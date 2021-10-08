@@ -21,8 +21,6 @@ import 'package:audio_service_example/common.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 
 // You might want to provide this using dependency injection rather than a
@@ -290,9 +288,8 @@ class AudioPlayerHandler extends BaseAudioHandler
   final BehaviorSubject<List<MediaItem>> _recentSubject =
       BehaviorSubject.seeded(<MediaItem>[]);
   final _mediaLibrary = MediaLibrary();
-  final _player = AudioPlayer();
 
-  int? get index => _player.currentIndex;
+  int? get index => 0;
 
   AudioPlayerHandler() {
     _init();
@@ -306,28 +303,7 @@ class AudioPlayerHandler extends BaseAudioHandler
         .whereType<MediaItem>()
         .listen((item) => _recentSubject.add([item]));
     // Broadcast media item changes.
-    _player.currentIndexStream.listen((index) {
-      if (index != null) mediaItem.add(queue.value[index]);
-    });
-    // Propagate all events from the audio player to AudioService clients.
-    _player.playbackEventStream.listen(_broadcastState);
-    // In this example, the service stops when reaching the end.
-    _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) stop();
-    });
-    try {
-      // After a cold restart (on Android), _player.load jumps straight from
-      // the loading state to the completed state. Inserting a delay makes it
-      // work. Not sure why!
-      //await Future.delayed(Duration(seconds: 2)); // magic delay
-      await _player.setAudioSource(ConcatenatingAudioSource(
-        children: queue.value
-            .map((item) => AudioSource.uri(Uri.parse(item.id)))
-            .toList(),
-      ));
-    } catch (e) {
-      print("Error: $e");
-    }
+
   }
 
   @override
@@ -365,56 +341,24 @@ class AudioPlayerHandler extends BaseAudioHandler
     // the [QueueHandler] mixin will delegate to this method.
     if (index < 0 || index >= queue.value.length) return;
     // This jumps to the beginning of the queue item at newIndex.
-    _player.seek(Duration.zero, index: index);
+
     // Demonstrate custom events.
     customEvent.add('skip to $index');
   }
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() async {}
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() async {}
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) async {}
 
   @override
   Future<void> stop() async {
-    await _player.stop();
     await playbackState.firstWhere(
         (state) => state.processingState == AudioProcessingState.idle);
-  }
-
-  /// Broadcasts the current state to all clients.
-  void _broadcastState(PlaybackEvent event) {
-    final playing = _player.playing;
-    playbackState.add(playbackState.value.copyWith(
-      controls: [
-        MediaControl.skipToPrevious,
-        if (playing) MediaControl.pause else MediaControl.play,
-        MediaControl.stop,
-        MediaControl.skipToNext,
-      ],
-      systemActions: const {
-        MediaAction.seek,
-        MediaAction.seekForward,
-        MediaAction.seekBackward,
-      },
-      androidCompactActionIndices: const [0, 1, 3],
-      processingState: const {
-        ProcessingState.idle: AudioProcessingState.idle,
-        ProcessingState.loading: AudioProcessingState.loading,
-        ProcessingState.buffering: AudioProcessingState.buffering,
-        ProcessingState.ready: AudioProcessingState.ready,
-        ProcessingState.completed: AudioProcessingState.completed,
-      }[_player.processingState]!,
-      playing: playing,
-      updatePosition: _player.position,
-      bufferedPosition: _player.bufferedPosition,
-      speed: _player.speed,
-      queueIndex: event.currentIndex,
-    ));
   }
 }
 
@@ -645,15 +589,11 @@ class SleeperInterruptedException {}
 /// A wrapper around FlutterTts that makes it easier to wait for speech to
 /// complete.
 class Tts {
-  final FlutterTts _flutterTts = FlutterTts();
   Completer<void>? _speechCompleter;
   bool _interruptRequested = false;
   bool _playing = false;
 
   Tts() {
-    _flutterTts.setCompletionHandler(() {
-      _speechCompleter?.complete();
-    });
   }
 
   bool get playing => _playing;
@@ -662,7 +602,6 @@ class Tts {
     _playing = true;
     if (!_interruptRequested) {
       _speechCompleter = Completer();
-      await _flutterTts.speak(text);
       await _speechCompleter!.future;
       _speechCompleter = null;
     }
@@ -675,7 +614,6 @@ class Tts {
 
   Future<void> stop() async {
     if (_playing) {
-      await _flutterTts.stop();
       _speechCompleter?.complete();
     }
   }
